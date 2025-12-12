@@ -1,6 +1,40 @@
 #!/bin/bash
 
+echo "[WAN22] ============================================"
 echo "[WAN22] Iniciando worker..."
+echo "[WAN22] ============================================"
+
+# Diagnósticos iniciais
+echo "[WAN22] === DIAGNOSTICOS ==="
+echo "[WAN22] Python version:"
+python --version 2>&1
+echo "[WAN22] PyTorch version:"
+python -c "import torch; print(f'PyTorch {torch.__version__}, CUDA: {torch.cuda.is_available()}')" 2>&1
+echo "[WAN22] ComfyUI path:"
+ls -la /comfyui/ 2>&1 | head -5
+
+# Testar imports críticos
+echo "[WAN22] === TESTANDO IMPORTS ==="
+python -c "
+import sys
+sys.path.insert(0, '/comfyui')
+try:
+    from comfy.ldm.flux.math import apply_rope1
+    print('[WAN22] OK: apply_rope1 encontrado')
+except Exception as e:
+    print(f'[WAN22] ERRO apply_rope1: {e}')
+
+try:
+    import comfy.model_management
+    print('[WAN22] OK: comfy.model_management')
+except Exception as e:
+    print(f'[WAN22] ERRO model_management: {e}')
+" 2>&1
+
+# Verificar volume
+echo "[WAN22] === VERIFICANDO VOLUME ==="
+echo "[WAN22] Conteudo /runpod-volume:"
+ls -la /runpod-volume/ 2>&1 || echo "[WAN22] /runpod-volume nao existe"
 
 # Criar symlinks para modelos no volume
 if [ -d "/runpod-volume/wan22_models" ]; then
@@ -26,6 +60,8 @@ if [ -d "/runpod-volume/wan22_models" ]; then
     ls -la /comfyui/models/loras/
 else
     echo "[WAN22] AVISO: Volume nao encontrado em /runpod-volume/wan22_models"
+    echo "[WAN22] Listando /runpod-volume para debug:"
+    find /runpod-volume -type d -maxdepth 3 2>/dev/null || echo "Nenhum conteudo"
 fi
 
 # ====== INICIO DO SCRIPT ORIGINAL DO WORKER-COMFYUI ======
@@ -42,32 +78,59 @@ fi
 # Get log level from environment or default to DEBUG
 COMFY_LOG_LEVEL="${COMFY_LOG_LEVEL:-DEBUG}"
 
-echo "[WAN22] Iniciando ComfyUI..."
+echo "[WAN22] === INICIANDO COMFYUI ==="
 
-# Start ComfyUI in the background
+# Criar arquivo de log
+COMFY_LOG="/tmp/comfyui.log"
+touch $COMFY_LOG
+
+# Start ComfyUI in the background, capturando output
 if [ "${SERVE_API_LOCALLY}" == "true" ]; then
-    python /comfyui/main.py --disable-auto-launch --disable-metadata --listen --log-level "${COMFY_LOG_LEVEL}" &
+    python /comfyui/main.py --disable-auto-launch --disable-metadata --listen --log-level "${COMFY_LOG_LEVEL}" > $COMFY_LOG 2>&1 &
 else
-    python /comfyui/main.py --disable-auto-launch --disable-metadata --log-level "${COMFY_LOG_LEVEL}" &
+    python /comfyui/main.py --disable-auto-launch --disable-metadata --log-level "${COMFY_LOG_LEVEL}" > $COMFY_LOG 2>&1 &
 fi
 
-# NOVO: Aguardar ComfyUI iniciar antes de chamar o handler
-echo "[WAN22] Aguardando ComfyUI iniciar..."
-for i in {1..60}; do
+COMFY_PID=$!
+echo "[WAN22] ComfyUI iniciado com PID: $COMFY_PID"
+
+# Aguardar ComfyUI iniciar
+echo "[WAN22] Aguardando ComfyUI ficar online..."
+for i in {1..90}; do
+    # Verificar se processo ainda existe
+    if ! kill -0 $COMFY_PID 2>/dev/null; then
+        echo "[WAN22] ERRO: Processo ComfyUI morreu!"
+        echo "[WAN22] === ULTIMAS 50 LINHAS DO LOG ==="
+        tail -50 $COMFY_LOG
+        exit 1
+    fi
+
     if curl -s http://127.0.0.1:8188 > /dev/null 2>&1; then
-        echo "[WAN22] ComfyUI esta online! (tentativa $i)"
+        echo "[WAN22] ComfyUI esta online! (tentativa $i, ~${i}s)"
         break
     fi
-    echo "[WAN22] Aguardando... ($i/60)"
-    sleep 2
+
+    # Mostrar progresso do log
+    if [ $((i % 10)) -eq 0 ]; then
+        echo "[WAN22] Aguardando... ($i/90) - Ultimas linhas do log:"
+        tail -3 $COMFY_LOG
+    fi
+    sleep 1
 done
 
 # Verificar se ComfyUI está realmente rodando
 if ! curl -s http://127.0.0.1:8188 > /dev/null 2>&1; then
-    echo "[WAN22] ERRO: ComfyUI nao iniciou apos 120 segundos!"
-    echo "[WAN22] Verificando logs de erro..."
-    # Mostra os últimos processos python
+    echo "[WAN22] ============================================"
+    echo "[WAN22] ERRO: ComfyUI nao iniciou apos 90 segundos!"
+    echo "[WAN22] ============================================"
+    echo "[WAN22] === LOG COMPLETO ==="
+    cat $COMFY_LOG
+    echo "[WAN22] === PROCESSOS PYTHON ==="
     ps aux | grep python
+    echo "[WAN22] === MEMORIA ==="
+    free -h
+    echo "[WAN22] === GPU ==="
+    nvidia-smi 2>&1 || echo "nvidia-smi nao disponivel"
     exit 1
 fi
 

@@ -34,8 +34,10 @@ fi
 TCMALLOC="$(ldconfig -p | grep -Po "libtcmalloc.so.\d" | head -n 1)"
 export LD_PRELOAD="${TCMALLOC}"
 
-# Set ComfyUI Manager to offline mode
-bash /scripts/comfy-manager-set-mode.sh offline
+# Set ComfyUI Manager to offline mode (se o script existir)
+if [ -f /scripts/comfy-manager-set-mode.sh ]; then
+    bash /scripts/comfy-manager-set-mode.sh offline
+fi
 
 # Get log level from environment or default to DEBUG
 COMFY_LOG_LEVEL="${COMFY_LOG_LEVEL:-DEBUG}"
@@ -47,6 +49,26 @@ if [ "${SERVE_API_LOCALLY}" == "true" ]; then
     python /comfyui/main.py --disable-auto-launch --disable-metadata --listen --log-level "${COMFY_LOG_LEVEL}" &
 else
     python /comfyui/main.py --disable-auto-launch --disable-metadata --log-level "${COMFY_LOG_LEVEL}" &
+fi
+
+# NOVO: Aguardar ComfyUI iniciar antes de chamar o handler
+echo "[WAN22] Aguardando ComfyUI iniciar..."
+for i in {1..60}; do
+    if curl -s http://127.0.0.1:8188 > /dev/null 2>&1; then
+        echo "[WAN22] ComfyUI esta online! (tentativa $i)"
+        break
+    fi
+    echo "[WAN22] Aguardando... ($i/60)"
+    sleep 2
+done
+
+# Verificar se ComfyUI está realmente rodando
+if ! curl -s http://127.0.0.1:8188 > /dev/null 2>&1; then
+    echo "[WAN22] ERRO: ComfyUI nao iniciou apos 120 segundos!"
+    echo "[WAN22] Verificando logs de erro..."
+    # Mostra os últimos processos python
+    ps aux | grep python
+    exit 1
 fi
 
 echo "[WAN22] Iniciando RunPod Handler..."

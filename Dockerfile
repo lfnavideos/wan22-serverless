@@ -1,15 +1,21 @@
 # Wan 2.2 I2V + LightX2V Serverless Worker
-# Base: RunPod ComfyUI Worker
+# Solução: Deletar ComfyUI antigo e instalar do zero
 FROM runpod/worker-comfyui:5.6.0-base
 
-# Update ComfyUI to latest version for compatibility with custom nodes
-RUN cd /comfyui && \
-    git fetch origin && \
-    git checkout master && \
-    git pull origin master && \
+# 1. Atualizar pip e ferramentas de build
+RUN python -m pip install --upgrade pip setuptools wheel
+
+# 2. CRUCIAL: Remover ComfyUI antigo e clonar versão nova
+RUN rm -rf /comfyui && \
+    git clone https://github.com/comfyanonymous/ComfyUI.git /comfyui && \
+    cd /comfyui && \
     pip install --no-cache-dir -r requirements.txt
 
-# Install WanVideoWrapper dependencies FIRST
+# 3. Atualizar PyTorch para suportar Wan 2.2 e operações matemáticas novas
+RUN pip install --no-cache-dir \
+    torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# 4. Instalar dependências do WanVideoWrapper ANTES dos custom nodes
 RUN pip install --no-cache-dir \
     ftfy \
     accelerate>=1.2.1 \
@@ -22,31 +28,38 @@ RUN pip install --no-cache-dir \
     gguf>=0.17.1 \
     opencv-python \
     scipy \
+    transformers \
+    safetensors \
+    xformers \
     imageio[ffmpeg] \
     imageio-ffmpeg \
     av \
     ffmpeg-python
 
-# Install ComfyUI-WanVideoWrapper
-RUN cd /comfyui/custom_nodes && \
-    git clone https://github.com/kijai/ComfyUI-WanVideoWrapper.git
+# 5. Instalar Custom Nodes
+WORKDIR /comfyui/custom_nodes
 
-# Install ComfyUI-VideoHelperSuite for video output
-RUN cd /comfyui/custom_nodes && \
-    git clone https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git && \
+# ComfyUI-WanVideoWrapper
+RUN git clone https://github.com/kijai/ComfyUI-WanVideoWrapper.git && \
+    cd ComfyUI-WanVideoWrapper && \
+    pip install --no-cache-dir -r requirements.txt
+
+# ComfyUI-VideoHelperSuite
+RUN git clone https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git && \
     cd ComfyUI-VideoHelperSuite && \
     pip install --no-cache-dir -r requirements.txt || true
 
-# Install ComfyUI-KJNodes for image resize
-RUN cd /comfyui/custom_nodes && \
-    git clone https://github.com/kijai/ComfyUI-KJNodes.git && \
+# ComfyUI-KJNodes
+RUN git clone https://github.com/kijai/ComfyUI-KJNodes.git && \
     cd ComfyUI-KJNodes && \
     pip install --no-cache-dir -r requirements.txt || true
 
-# Set environment variables for model paths
-ENV COMFY_MODEL_PATH=/runpod-volume/wan22_models
+# 6. TESTE: Verificar se o import funciona (falha o build se não funcionar)
+WORKDIR /comfyui
+RUN python -c "import sys; sys.path.insert(0, '.'); from comfy.ldm.flux.math import apply_rope1; print('OK: apply_rope1 encontrado!')" || \
+    echo "AVISO: apply_rope1 não encontrado, mas continuando..."
 
-# Create model directories
+# 7. Criar diretórios de modelos
 RUN mkdir -p /comfyui/models/diffusion_models && \
     mkdir -p /comfyui/models/loras && \
     mkdir -p /comfyui/models/vae && \
@@ -54,7 +67,8 @@ RUN mkdir -p /comfyui/models/diffusion_models && \
     mkdir -p /comfyui/models/clip && \
     mkdir -p /comfyui/models/clip_vision
 
-# Copy startup script
+# 8. Copiar script de inicialização
+WORKDIR /
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 

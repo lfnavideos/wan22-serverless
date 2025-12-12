@@ -2,16 +2,25 @@
 # Base: RunPod ComfyUI Worker
 FROM runpod/worker-comfyui:5.6.0-base
 
-# Install ComfyUI-WanVideoWrapper using comfy-node-install (recommended method)
-RUN comfy-node-install comfyui-wanvideowrapper
+# Install ComfyUI-WanVideoWrapper from git
+RUN cd /comfyui/custom_nodes && \
+    git clone https://github.com/kijai/ComfyUI-WanVideoWrapper.git && \
+    cd ComfyUI-WanVideoWrapper && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Install ComfyUI-VideoHelperSuite for video output
-RUN comfy-node-install comfyui-videohelper
+RUN cd /comfyui/custom_nodes && \
+    git clone https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git && \
+    cd ComfyUI-VideoHelperSuite && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Install ComfyUI-KJNodes for image resize
-RUN comfy-node-install comfyui-kjnodes
+RUN cd /comfyui/custom_nodes && \
+    git clone https://github.com/kijai/ComfyUI-KJNodes.git && \
+    cd ComfyUI-KJNodes && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Install additional dependencies that may be missing
+# Install additional dependencies
 RUN pip install --no-cache-dir \
     imageio[ffmpeg] \
     imageio-ffmpeg \
@@ -21,14 +30,14 @@ RUN pip install --no-cache-dir \
 # Set environment variables for model paths
 ENV COMFY_MODEL_PATH=/runpod-volume/wan22_models
 
-# Create model directories if they don't exist
+# Create model directories
 RUN mkdir -p /comfyui/models/diffusion_models && \
     mkdir -p /comfyui/models/loras && \
     mkdir -p /comfyui/models/vae && \
     mkdir -p /comfyui/models/text_encoders && \
     mkdir -p /comfyui/models/clip
 
-# Copy startup script that creates symlinks
+# Copy startup script
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 

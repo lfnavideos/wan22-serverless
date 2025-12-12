@@ -1,8 +1,8 @@
 #!/bin/bash
-set -e
+# Nao usar set -e para evitar exit prematuro
 
 echo "========================================"
-echo "[WAN22] INICIANDO WORKER v3.0"
+echo "[WAN22] INICIANDO WORKER v4.0"
 echo "========================================"
 echo "[WAN22] Data: $(date)"
 
@@ -18,47 +18,17 @@ echo ""
 echo "[WAN22] === GPU ==="
 nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv 2>&1 || echo "[WAN22] nvidia-smi nao disponivel"
 
-# Testar imports criticos
-echo ""
-echo "[WAN22] === TESTANDO IMPORTS ==="
-python -c "
-import sys
-sys.path.insert(0, '/comfyui')
-errors = []
-
-try:
-    from comfy.ldm.flux.math import apply_rope1
-    print('[WAN22] OK: apply_rope1')
-except Exception as e:
-    errors.append(f'apply_rope1: {e}')
-    print(f'[WAN22] ERRO: apply_rope1 - {e}')
-
-try:
-    import comfy.model_management
-    print('[WAN22] OK: comfy.model_management')
-except Exception as e:
-    errors.append(f'model_management: {e}')
-    print(f'[WAN22] ERRO: comfy.model_management - {e}')
-
-if errors:
-    print('[WAN22] ERROS CRITICOS ENCONTRADOS!')
-    sys.exit(1)
-else:
-    print('[WAN22] Todos os imports OK!')
-" 2>&1
-
-# Verificar volume
+# Verificar volume e criar symlinks
 echo ""
 echo "[WAN22] === VOLUME ==="
 if [ -d "/runpod-volume" ]; then
     echo "[WAN22] /runpod-volume existe"
-    ls -la /runpod-volume/ 2>&1 | head -10
+    ls -la /runpod-volume/ 2>&1 | head -5
 
     if [ -d "/runpod-volume/wan22_models" ]; then
         echo "[WAN22] wan22_models encontrado!"
         echo "[WAN22] Criando symlinks..."
 
-        # Criar symlinks
         for dir in diffusion_models loras vae text_encoders clip; do
             if [ -d "/runpod-volume/wan22_models/$dir" ]; then
                 ln -sf /runpod-volume/wan22_models/$dir/* /comfyui/models/$dir/ 2>/dev/null || true
@@ -66,95 +36,77 @@ if [ -d "/runpod-volume" ]; then
             fi
         done
 
-        # Symlink clip para clip_vision tambem (CLIPVisionLoader usa clip_vision)
+        # Symlink clip para clip_vision tambem
         if [ -d "/runpod-volume/wan22_models/clip" ]; then
             ln -sf /runpod-volume/wan22_models/clip/* /comfyui/models/clip_vision/ 2>/dev/null || true
             echo "[WAN22] Symlink clip_vision: OK"
         fi
-
-        echo "[WAN22] === MODELOS DISPONIVEIS ==="
-        ls -la /comfyui/models/diffusion_models/ 2>&1 | head -5
-        ls -la /comfyui/models/loras/ 2>&1 | head -5
     else
-        echo "[WAN22] AVISO: wan22_models NAO encontrado no volume"
-        find /runpod-volume -type d -maxdepth 2 2>/dev/null || true
+        echo "[WAN22] AVISO: wan22_models NAO encontrado"
     fi
 else
     echo "[WAN22] AVISO: /runpod-volume NAO existe"
 fi
 
-# Configurar ambiente
-export LD_PRELOAD="$(ldconfig -p | grep -Po 'libtcmalloc.so.\d' | head -n 1)" 2>/dev/null || true
-
-# Download CLIP Vision model if not present (SEMPRE fazer esse check)
+# Download CLIP Vision model se nao existir
 echo ""
-echo "[WAN22] === VERIFICANDO CLIP VISION ==="
+echo "[WAN22] === CLIP VISION ==="
 CLIP_MODEL="/comfyui/models/clip_vision/clip_vision_h.safetensors"
 mkdir -p /comfyui/models/clip_vision
-echo "[WAN22] Conteudo de clip_vision ANTES:"
-ls -la /comfyui/models/clip_vision/ || echo "(vazio)"
 
 if [ ! -f "$CLIP_MODEL" ] || [ ! -s "$CLIP_MODEL" ]; then
-    echo "[WAN22] Downloading clip_vision_h.safetensors (~1.1GB)..."
+    echo "[WAN22] Baixando clip_vision_h.safetensors (~1.1GB)..."
     rm -f "$CLIP_MODEL" 2>/dev/null || true
 
-    # Tentar wget primeiro
+    # Tentar wget
     if command -v wget >/dev/null 2>&1; then
         echo "[WAN22] Usando wget..."
-        wget -O "$CLIP_MODEL" "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/clip_vision_h.safetensors" && echo "[WAN22] wget OK" || echo "[WAN22] wget falhou"
+        wget -q -O "$CLIP_MODEL" "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/clip_vision_h.safetensors"
+        if [ -f "$CLIP_MODEL" ] && [ -s "$CLIP_MODEL" ]; then
+            echo "[WAN22] wget OK!"
+        else
+            echo "[WAN22] wget falhou, tentando curl..."
+            rm -f "$CLIP_MODEL" 2>/dev/null || true
+        fi
     fi
 
     # Se wget falhou, tentar curl
     if [ ! -f "$CLIP_MODEL" ] || [ ! -s "$CLIP_MODEL" ]; then
         if command -v curl >/dev/null 2>&1; then
             echo "[WAN22] Usando curl..."
-            curl -L -o "$CLIP_MODEL" "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/clip_vision_h.safetensors" && echo "[WAN22] curl OK" || echo "[WAN22] curl falhou"
+            curl -sL -o "$CLIP_MODEL" "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/clip_vision_h.safetensors"
         fi
     fi
 
     # Verificar resultado
     if [ -f "$CLIP_MODEL" ] && [ -s "$CLIP_MODEL" ]; then
-        echo "[WAN22] clip_vision_h.safetensors baixado com sucesso!"
+        echo "[WAN22] clip_vision_h.safetensors baixado!"
         ls -lh "$CLIP_MODEL"
     else
-        echo "[WAN22] ERRO CRITICO: Falha ao baixar clip_vision_h.safetensors"
-        echo "[WAN22] wget disponivel: $(command -v wget 2>/dev/null || echo 'NAO')"
-        echo "[WAN22] curl disponivel: $(command -v curl 2>/dev/null || echo 'NAO')"
+        echo "[WAN22] ERRO: Falha ao baixar clip_vision_h.safetensors"
     fi
 else
     echo "[WAN22] clip_vision_h.safetensors ja existe"
     ls -lh "$CLIP_MODEL"
 fi
 
-echo "[WAN22] Conteudo de clip_vision DEPOIS:"
-ls -la /comfyui/models/clip_vision/ || echo "(vazio)"
+echo "[WAN22] Conteudo clip_vision:"
+ls -la /comfyui/models/clip_vision/ 2>&1 | head -5
 
 # Iniciar ComfyUI
 echo ""
 echo "[WAN22] === INICIANDO COMFYUI ==="
 cd /comfyui
 
-# Rodar ComfyUI em foreground por 5 segundos para capturar erros iniciais
-timeout 10 python main.py --disable-auto-launch --disable-metadata --log-level DEBUG 2>&1 | head -100 &
-COMFY_PID=$!
-sleep 5
-
-# Agora rodar em background de verdade
-pkill -f "python main.py" 2>/dev/null || true
-sleep 2
-
-python main.py --disable-auto-launch --disable-metadata --log-level DEBUG &
+python main.py --disable-auto-launch --disable-metadata &
 COMFY_PID=$!
 echo "[WAN22] ComfyUI PID: $COMFY_PID"
 
 # Aguardar ComfyUI
-echo "[WAN22] Aguardando ComfyUI (max 120s)..."
-for i in $(seq 1 120); do
+echo "[WAN22] Aguardando ComfyUI (max 180s)..."
+for i in $(seq 1 180); do
     if ! kill -0 $COMFY_PID 2>/dev/null; then
         echo "[WAN22] ERRO: ComfyUI morreu!"
-        wait $COMFY_PID
-        EXIT_CODE=$?
-        echo "[WAN22] Exit code: $EXIT_CODE"
         exit 1
     fi
 
@@ -163,17 +115,15 @@ for i in $(seq 1 120); do
         break
     fi
 
-    if [ $((i % 15)) -eq 0 ]; then
+    if [ $((i % 30)) -eq 0 ]; then
         echo "[WAN22] Ainda aguardando... (${i}s)"
     fi
     sleep 1
 done
 
-# Verificar final
+# Verificar se ComfyUI iniciou
 if ! curl -s http://127.0.0.1:8188 > /dev/null 2>&1; then
-    echo "[WAN22] ERRO: ComfyUI nao iniciou apos 120s!"
-    echo "[WAN22] Verificando processo..."
-    ps aux | grep -E "python|comfy" | head -10
+    echo "[WAN22] ERRO: ComfyUI nao iniciou!"
     exit 1
 fi
 

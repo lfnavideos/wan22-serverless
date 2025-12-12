@@ -90,20 +90,44 @@ export LD_PRELOAD="$(ldconfig -p | grep -Po 'libtcmalloc.so.\d' | head -n 1)" 2>
 echo ""
 echo "[WAN22] === VERIFICANDO CLIP VISION ==="
 CLIP_MODEL="/comfyui/models/clip_vision/clip_vision_h.safetensors"
-if [ ! -f "$CLIP_MODEL" ]; then
+mkdir -p /comfyui/models/clip_vision
+echo "[WAN22] Conteudo de clip_vision ANTES:"
+ls -la /comfyui/models/clip_vision/ || echo "(vazio)"
+
+if [ ! -f "$CLIP_MODEL" ] || [ ! -s "$CLIP_MODEL" ]; then
     echo "[WAN22] Downloading clip_vision_h.safetensors (~1.1GB)..."
-    mkdir -p /comfyui/models/clip_vision
-    wget -q --show-progress -O "$CLIP_MODEL" "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/clip_vision_h.safetensors" 2>&1 || \
-    curl -L -o "$CLIP_MODEL" "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/clip_vision_h.safetensors" 2>&1 || \
-    echo "[WAN22] AVISO: Falha ao baixar clip_vision_h"
-    if [ -f "$CLIP_MODEL" ]; then
-        echo "[WAN22] clip_vision_h.safetensors baixado!"
+    rm -f "$CLIP_MODEL" 2>/dev/null || true
+
+    # Tentar wget primeiro
+    if command -v wget >/dev/null 2>&1; then
+        echo "[WAN22] Usando wget..."
+        wget -O "$CLIP_MODEL" "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/clip_vision_h.safetensors" && echo "[WAN22] wget OK" || echo "[WAN22] wget falhou"
+    fi
+
+    # Se wget falhou, tentar curl
+    if [ ! -f "$CLIP_MODEL" ] || [ ! -s "$CLIP_MODEL" ]; then
+        if command -v curl >/dev/null 2>&1; then
+            echo "[WAN22] Usando curl..."
+            curl -L -o "$CLIP_MODEL" "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/clip_vision_h.safetensors" && echo "[WAN22] curl OK" || echo "[WAN22] curl falhou"
+        fi
+    fi
+
+    # Verificar resultado
+    if [ -f "$CLIP_MODEL" ] && [ -s "$CLIP_MODEL" ]; then
+        echo "[WAN22] clip_vision_h.safetensors baixado com sucesso!"
         ls -lh "$CLIP_MODEL"
+    else
+        echo "[WAN22] ERRO CRITICO: Falha ao baixar clip_vision_h.safetensors"
+        echo "[WAN22] wget disponivel: $(command -v wget 2>/dev/null || echo 'NAO')"
+        echo "[WAN22] curl disponivel: $(command -v curl 2>/dev/null || echo 'NAO')"
     fi
 else
     echo "[WAN22] clip_vision_h.safetensors ja existe"
     ls -lh "$CLIP_MODEL"
 fi
+
+echo "[WAN22] Conteudo de clip_vision DEPOIS:"
+ls -la /comfyui/models/clip_vision/ || echo "(vazio)"
 
 # Iniciar ComfyUI
 echo ""

@@ -28,6 +28,32 @@ else
     echo "[WAN22] AVISO: Volume nao encontrado em /runpod-volume/wan22_models"
 fi
 
-# Iniciar o handler do RunPod
-echo "[WAN22] Iniciando handler..."
-exec python -u /handler.py
+# ====== INICIO DO SCRIPT ORIGINAL DO WORKER-COMFYUI ======
+
+# Find libtcmalloc and set LD_PRELOAD for memory optimization
+TCMALLOC="$(ldconfig -p | grep -Po "libtcmalloc.so.\d" | head -n 1)"
+export LD_PRELOAD="${TCMALLOC}"
+
+# Set ComfyUI Manager to offline mode
+bash /scripts/comfy-manager-set-mode.sh offline
+
+# Get log level from environment or default to DEBUG
+COMFY_LOG_LEVEL="${COMFY_LOG_LEVEL:-DEBUG}"
+
+echo "[WAN22] Iniciando ComfyUI..."
+
+# Start ComfyUI in the background
+if [ "${SERVE_API_LOCALLY}" == "true" ]; then
+    python /comfyui/main.py --disable-auto-launch --disable-metadata --listen --log-level "${COMFY_LOG_LEVEL}" &
+else
+    python /comfyui/main.py --disable-auto-launch --disable-metadata --log-level "${COMFY_LOG_LEVEL}" &
+fi
+
+echo "[WAN22] Iniciando RunPod Handler..."
+
+# Start the RunPod Handler
+if [ "${SERVE_API_LOCALLY}" == "true" ]; then
+    python -u /handler.py --rp_serve_api --rp_api_host=0.0.0.0
+else
+    python -u /handler.py
+fi

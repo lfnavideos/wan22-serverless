@@ -66,6 +66,12 @@ if [ -d "/runpod-volume" ]; then
             fi
         done
 
+        # Symlink clip para clip_vision tambem (CLIPVisionLoader usa clip_vision)
+        if [ -d "/runpod-volume/wan22_models/clip" ]; then
+            ln -sf /runpod-volume/wan22_models/clip/* /comfyui/models/clip_vision/ 2>/dev/null || true
+            echo "[WAN22] Symlink clip_vision: OK"
+        fi
+
         echo "[WAN22] === MODELOS DISPONIVEIS ==="
         ls -la /comfyui/models/diffusion_models/ 2>&1 | head -5
         ls -la /comfyui/models/loras/ 2>&1 | head -5

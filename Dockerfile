@@ -70,39 +70,9 @@ RUN mkdir -p /comfyui/models/diffusion_models && \
 # 8. Configurar extra_model_paths.yaml para usar modelos do volume
 RUN echo 'wan22_volume:\n    base_path: /runpod-volume/wan22_models\n    diffusion_models: diffusion_models\n    loras: loras\n    vae: vae\n    clip: clip\n    clip_vision: clip\n    text_encoders: text_encoders' > /comfyui/extra_model_paths.yaml
 
-# 9. TESTE COMPLETO: Verificar se ComfyUI inicia corretamente (sem GPU)
+# 9. TESTE COMPLETO: Verificar se ComfyUI inicia corretamente
 WORKDIR /comfyui
-RUN python -c "
-import sys
-sys.path.insert(0, '.')
-print('=== TESTE DE IMPORTS ===')
-
-# Testar imports básicos do ComfyUI
-try:
-    import comfy.model_management
-    print('OK: comfy.model_management')
-except Exception as e:
-    print(f'ERRO: comfy.model_management - {e}')
-    sys.exit(1)
-
-try:
-    from comfy.ldm.flux.math import apply_rope1
-    print('OK: apply_rope1')
-except Exception as e:
-    print(f'ERRO: apply_rope1 - {e}')
-    sys.exit(1)
-
-# Testar imports do WanVideoWrapper
-try:
-    sys.path.insert(0, 'custom_nodes/ComfyUI-WanVideoWrapper')
-    import importlib
-    print('OK: WanVideoWrapper path added')
-except Exception as e:
-    print(f'ERRO: WanVideoWrapper - {e}')
-    sys.exit(1)
-
-print('=== TODOS OS TESTES PASSARAM ===')
-"
+RUN python -c "import sys; sys.path.insert(0, '.'); from comfy.ldm.flux.math import apply_rope1; import comfy.model_management; print('OK: Todos os imports criticos funcionam!')"
 
 # 10. Copiar script de inicialização
 WORKDIR /

@@ -72,21 +72,6 @@ if [ -d "/runpod-volume" ]; then
             echo "[WAN22] Symlink clip_vision: OK"
         fi
 
-        # Download CLIP Vision model if not present
-        CLIP_MODEL="/comfyui/models/clip_vision/clip_vision_h.safetensors"
-        if [ ! -f "$CLIP_MODEL" ]; then
-            echo "[WAN22] Downloading clip_vision_h.safetensors..."
-            wget -q -O "$CLIP_MODEL" "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/clip_vision_h.safetensors" 2>&1 || \
-            curl -sL -o "$CLIP_MODEL" "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/clip_vision_h.safetensors" 2>&1 || \
-            echo "[WAN22] AVISO: Falha ao baixar clip_vision_h"
-            if [ -f "$CLIP_MODEL" ]; then
-                echo "[WAN22] clip_vision_h.safetensors baixado!"
-                ls -lh "$CLIP_MODEL"
-            fi
-        else
-            echo "[WAN22] clip_vision_h.safetensors ja existe"
-        fi
-
         echo "[WAN22] === MODELOS DISPONIVEIS ==="
         ls -la /comfyui/models/diffusion_models/ 2>&1 | head -5
         ls -la /comfyui/models/loras/ 2>&1 | head -5
@@ -100,6 +85,25 @@ fi
 
 # Configurar ambiente
 export LD_PRELOAD="$(ldconfig -p | grep -Po 'libtcmalloc.so.\d' | head -n 1)" 2>/dev/null || true
+
+# Download CLIP Vision model if not present (SEMPRE fazer esse check)
+echo ""
+echo "[WAN22] === VERIFICANDO CLIP VISION ==="
+CLIP_MODEL="/comfyui/models/clip_vision/clip_vision_h.safetensors"
+if [ ! -f "$CLIP_MODEL" ]; then
+    echo "[WAN22] Downloading clip_vision_h.safetensors (~1.1GB)..."
+    mkdir -p /comfyui/models/clip_vision
+    wget -q --show-progress -O "$CLIP_MODEL" "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/clip_vision_h.safetensors" 2>&1 || \
+    curl -L -o "$CLIP_MODEL" "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/clip_vision_h.safetensors" 2>&1 || \
+    echo "[WAN22] AVISO: Falha ao baixar clip_vision_h"
+    if [ -f "$CLIP_MODEL" ]; then
+        echo "[WAN22] clip_vision_h.safetensors baixado!"
+        ls -lh "$CLIP_MODEL"
+    fi
+else
+    echo "[WAN22] clip_vision_h.safetensors ja existe"
+    ls -lh "$CLIP_MODEL"
+fi
 
 # Iniciar ComfyUI
 echo ""

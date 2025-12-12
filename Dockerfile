@@ -2,6 +2,11 @@
 # Base: RunPod ComfyUI Worker
 FROM runpod/worker-comfyui:5.6.0-base
 
+# Update ComfyUI to latest version for compatibility
+RUN cd /comfyui && \
+    git fetch origin && \
+    git reset --hard origin/master
+
 # Install ComfyUI-WanVideoWrapper from git
 RUN cd /comfyui/custom_nodes && \
     git clone https://github.com/kijai/ComfyUI-WanVideoWrapper.git && \

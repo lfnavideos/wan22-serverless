@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Custom Handler for Wan 2.2 + LightX2V
-Extends base handler to support video outputs
+Supports video outputs from ComfyUI VHS_VideoCombine node
 """
 
 import os
@@ -9,19 +9,27 @@ import time
 import json
 import base64
 import glob
+import requests
 import runpod
-from runpod.serverless.utils import rp_upload
-
-# Import from base worker-comfyui
-import sys
-sys.path.insert(0, '/src')
-try:
-    from handler import ComfyUI, process_output_images
-except ImportError:
-    # Fallback for local testing
-    pass
 
 COMFY_OUTPUT_PATH = os.environ.get('COMFY_OUTPUT_PATH', '/comfyui/output')
+COMFY_API_URL = os.environ.get('COMFY_API_URL', 'http://127.0.0.1:8188')
+
+
+def wait_for_comfyui(timeout=120):
+    """Wait for ComfyUI to be ready"""
+    start = time.time()
+    while time.time() - start < timeout:
+        try:
+            r = requests.get(f'{COMFY_API_URL}/system_stats', timeout=5)
+            if r.status_code == 200:
+                print(f"[HANDLER] ComfyUI ready after {int(time.time()-start)}s")
+                return True
+        except:
+            pass
+        time.sleep(2)
+    return False
+
 
 def get_video_files(output_path, start_time):
     """Scan output folder for video files created after start_time"""
@@ -31,57 +39,51 @@ def get_video_files(output_path, start_time):
     for ext in video_extensions:
         pattern = os.path.join(output_path, f'*{ext}')
         for filepath in glob.glob(pattern):
-            if os.path.getmtime(filepath) > start_time:
-                videos.append(filepath)
+            try:
+                if os.path.getmtime(filepath) > start_time:
+                    videos.append(filepath)
+            except:
+                pass
 
     # Also check subdirectories
     for ext in video_extensions:
         pattern = os.path.join(output_path, '**', f'*{ext}')
         for filepath in glob.glob(pattern, recursive=True):
-            if os.path.getmtime(filepath) > start_time:
-                if filepath not in videos:
-                    videos.append(filepath)
+            try:
+                if os.path.getmtime(filepath) > start_time:
+                    if filepath not in videos:
+                        videos.append(filepath)
+            except:
+                pass
 
-    return sorted(videos, key=os.path.getmtime)
+    return sorted(videos, key=lambda x: os.path.getmtime(x))
 
 
 def upload_video(filepath, job_id):
-    """Upload video to S3 or return as base64"""
-    bucket_endpoint = os.environ.get('BUCKET_ENDPOINT_URL')
+    """Return video as base64"""
+    try:
+        with open(filepath, 'rb') as f:
+            video_data = f.read()
 
-    if bucket_endpoint:
-        # Use S3 upload
-        try:
-            filename = os.path.basename(filepath)
-            s3_url = rp_upload.upload_file_to_bucket(
-                file_path=filepath,
-                bucket_name='',  # Extracted from endpoint URL
-                prefix=job_id
-            )
-            return {'type': 's3_url', 'filename': filename, 'data': s3_url}
-        except Exception as e:
-            print(f"[HANDLER] S3 upload failed: {e}, falling back to base64")
+        # Check size limit (15MB to be safe)
+        if len(video_data) > 15 * 1024 * 1024:
+            return {
+                'type': 'error',
+                'filename': os.path.basename(filepath),
+                'data': f'Video too large ({len(video_data)/1024/1024:.1f}MB)'
+            }
 
-    # Fallback to base64
-    with open(filepath, 'rb') as f:
-        video_data = f.read()
-
-    # Check size limit (20MB for runsync)
-    if len(video_data) > 15 * 1024 * 1024:
-        return {'type': 'error', 'filename': os.path.basename(filepath),
-                'data': f'Video too large ({len(video_data)/1024/1024:.1f}MB). Configure S3 upload.'}
-
-    return {
-        'type': 'base64',
-        'filename': os.path.basename(filepath),
-        'data': base64.b64encode(video_data).decode('utf-8')
-    }
+        return {
+            'type': 'base64',
+            'filename': os.path.basename(filepath),
+            'data': base64.b64encode(video_data).decode('utf-8')
+        }
+    except Exception as e:
+        return {'type': 'error', 'filename': os.path.basename(filepath), 'data': str(e)}
 
 
 def handler(event):
-    """
-    Main handler function
-    """
+    """Main handler function"""
     job_id = event.get('id', 'unknown')
     job_input = event.get('input', {})
 
@@ -90,140 +92,106 @@ def handler(event):
     # Record start time for video detection
     start_time = time.time()
 
-    # Try to use the base ComfyUI handler
-    try:
-        # Check for workflow in input
-        workflow = job_input.get('workflow')
-        if not workflow:
-            return {'error': 'No workflow provided'}
-
-        # Import and use base handler components
-        from comfy_runner import ComfyRunner
-        runner = ComfyRunner()
-
-        # Process images if present
-        images = job_input.get('images', [])
-        if images:
-            for img in images:
-                name = img.get('name', 'INPUT_IMAGE')
-                img_data = img.get('image', '')
-                if img_data:
-                    # Decode and save image
-                    img_bytes = base64.b64decode(img_data)
-                    img_path = f'/comfyui/input/{name}.png'
-                    os.makedirs(os.path.dirname(img_path), exist_ok=True)
-                    with open(img_path, 'wb') as f:
-                        f.write(img_bytes)
-                    print(f"[HANDLER] Saved input image: {img_path}")
-
-        # Run workflow
-        result = runner.run_workflow(workflow)
-
-        # Wait a moment for file system
-        time.sleep(1)
-
-        # Get video files
-        videos = get_video_files(COMFY_OUTPUT_PATH, start_time)
-        print(f"[HANDLER] Found {len(videos)} video files")
-
-        # Process videos
-        video_outputs = []
-        for video_path in videos:
-            video_output = upload_video(video_path, job_id)
-            video_outputs.append(video_output)
-            print(f"[HANDLER] Processed video: {video_path}")
-
-        # Combine with images from base handler
-        output = {
-            'status': 'success',
-            'images': result.get('images', []) if result else [],
-            'videos': video_outputs
-        }
-
-        # For backward compatibility, add video as 'video' key too
-        if video_outputs:
-            output['video'] = video_outputs[0].get('data')
-
-        return output
-
-    except ImportError as e:
-        print(f"[HANDLER] Import error: {e}")
-        # If base handler not available, use simplified version
-        return handler_simple(event, start_time, job_id)
-    except Exception as e:
-        import traceback
-        print(f"[HANDLER] Error: {e}")
-        print(traceback.format_exc())
-        return {'error': str(e), 'status': 'FAILED'}
-
-
-def handler_simple(event, start_time, job_id):
-    """
-    Simplified handler that works with the base worker-comfyui
-    Just adds video scanning to the output
-    """
-    import requests
-
-    job_input = event.get('input', {})
+    # Get workflow
     workflow = job_input.get('workflow')
+    if not workflow:
+        return {'error': 'No workflow provided', 'status': 'FAILED'}
+
     images = job_input.get('images', [])
+
+    # Wait for ComfyUI to be ready
+    if not wait_for_comfyui(timeout=120):
+        return {'error': 'ComfyUI not ready after 120s', 'status': 'FAILED'}
 
     # Save input images
     for img in images:
         name = img.get('name', 'INPUT_IMAGE')
         img_data = img.get('image', '')
         if img_data:
-            img_bytes = base64.b64decode(img_data)
-            img_path = f'/comfyui/input/{name}.png'
-            os.makedirs(os.path.dirname(img_path), exist_ok=True)
-            with open(img_path, 'wb') as f:
-                f.write(img_bytes)
+            try:
+                img_bytes = base64.b64decode(img_data)
+                img_path = f'/comfyui/input/{name}.png'
+                os.makedirs(os.path.dirname(img_path), exist_ok=True)
+                with open(img_path, 'wb') as f:
+                    f.write(img_bytes)
+                print(f"[HANDLER] Saved: {img_path}")
+            except Exception as e:
+                print(f"[HANDLER] Error saving image: {e}")
 
     # Queue workflow via ComfyUI API
-    comfy_url = os.environ.get('COMFY_API_URL', 'http://127.0.0.1:8188')
-
-    # Queue prompt
-    response = requests.post(f'{comfy_url}/prompt', json={'prompt': workflow}, timeout=30)
-    if response.status_code != 200:
-        return {'error': f'Failed to queue workflow: {response.text}', 'status': 'FAILED'}
-
-    prompt_id = response.json().get('prompt_id')
-    print(f"[HANDLER] Queued prompt: {prompt_id}")
+    try:
+        response = requests.post(
+            f'{COMFY_API_URL}/prompt',
+            json={'prompt': workflow},
+            timeout=30
+        )
+        if response.status_code != 200:
+            return {
+                'error': f'Failed to queue workflow: {response.text}',
+                'status': 'FAILED'
+            }
+        prompt_id = response.json().get('prompt_id')
+        print(f"[HANDLER] Queued: {prompt_id}")
+    except Exception as e:
+        return {'error': f'Failed to connect to ComfyUI: {e}', 'status': 'FAILED'}
 
     # Wait for completion
     max_wait = 600
     waited = 0
+    completed = False
+
     while waited < max_wait:
         time.sleep(5)
         waited += 5
 
-        # Check history
-        hist = requests.get(f'{comfy_url}/history/{prompt_id}', timeout=30).json()
-        if prompt_id in hist:
-            outputs = hist[prompt_id].get('outputs', {})
-            status = hist[prompt_id].get('status', {})
+        try:
+            hist = requests.get(
+                f'{COMFY_API_URL}/history/{prompt_id}',
+                timeout=30
+            ).json()
 
-            if status.get('status_str') == 'error':
-                return {
-                    'error': status.get('messages', 'Unknown error'),
-                    'status': 'FAILED'
-                }
+            if prompt_id in hist:
+                status_info = hist[prompt_id].get('status', {})
+                status_str = status_info.get('status_str', '')
 
-            if outputs:
-                break
+                if status_str == 'error':
+                    messages = status_info.get('messages', [])
+                    error_msg = str(messages) if messages else 'Unknown error'
+                    return {'error': error_msg, 'status': 'FAILED'}
 
-        print(f"[HANDLER] Waiting... ({waited}s)")
+                if hist[prompt_id].get('outputs'):
+                    completed = True
+                    print(f"[HANDLER] Completed in {waited}s")
+                    break
+        except Exception as e:
+            print(f"[HANDLER] Error checking status: {e}")
+
+        if waited % 30 == 0:
+            print(f"[HANDLER] Waiting... ({waited}s)")
+
+    if not completed:
+        return {'error': f'Timeout after {max_wait}s', 'status': 'FAILED'}
+
+    # Wait for file system
+    time.sleep(2)
 
     # Get video files
-    time.sleep(1)
     videos = get_video_files(COMFY_OUTPUT_PATH, start_time)
-    print(f"[HANDLER] Found {len(videos)} video files")
+    print(f"[HANDLER] Found {len(videos)} video(s)")
 
     # Process videos
     video_outputs = []
     for video_path in videos:
         video_output = upload_video(video_path, job_id)
         video_outputs.append(video_output)
+        print(f"[HANDLER] Processed: {video_path}")
+
+    if not video_outputs:
+        return {
+            'error': 'Workflow completed but no video found',
+            'status': 'FAILED',
+            'details': f'Searched in {COMFY_OUTPUT_PATH}'
+        }
 
     output = {
         'status': 'success',
@@ -231,7 +199,8 @@ def handler_simple(event, start_time, job_id):
         'videos': video_outputs
     }
 
-    if video_outputs:
+    # Add first video as 'video' for backward compatibility
+    if video_outputs and video_outputs[0].get('type') == 'base64':
         output['video'] = video_outputs[0].get('data')
 
     return output

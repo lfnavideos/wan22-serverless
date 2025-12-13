@@ -59,7 +59,7 @@ echo ""
 echo "[WAN22] === INICIANDO COMFYUI ==="
 cd /comfyui
 
-python main.py --disable-auto-launch --disable-metadata &
+python main.py --listen 0.0.0.0 --port 8188 --disable-auto-launch --disable-metadata &
 COMFY_PID=$!
 echo "[WAN22] ComfyUI PID: $COMFY_PID"
 

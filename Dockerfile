@@ -58,8 +58,9 @@ RUN mkdir -p models/diffusion_models models/loras models/vae models/text_encoder
 
 # 7. PRE-DOWNLOAD CLIP Vision model na imagem (evita timeout do health check)
 # Este modelo de ~1.1GB e necessario para o CLIPVisionLoader do workflow
+# URL corrigido: Comfy-Org/Wan_2.1_ComfyUI_repackaged
 RUN wget -O /comfyui/models/clip_vision/clip_vision_h.safetensors \
-    "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/clip_vision_h.safetensors" && \
+    "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/clip_vision/clip_vision_h.safetensors" && \
     ls -lh /comfyui/models/clip_vision/clip_vision_h.safetensors
 
 # 8. Copiar script de inicializacao

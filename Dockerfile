@@ -64,14 +64,18 @@ RUN wget -O /comfyui/models/clip_vision/clip_vision_h.safetensors \
     ls -lh /comfyui/models/clip_vision/clip_vision_h.safetensors
 
 # 8. Copiar script de inicializacao
-# Salvar o start.sh original primeiro
+# Salvar o start.sh e handler.py originais
 RUN if [ -f /start.sh ]; then mv /start.sh /start.sh.original; fi
+RUN if [ -f /handler.py ]; then mv /handler.py /handler.py.original; fi
 
-# 9. Copiar nosso start.sh customizado
+# 9. Copiar nosso handler customizado (com suporte a video)
+COPY handler.py /handler.py
+
+# 10. Copiar nosso start.sh customizado
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
-# 10. Teste de import (sem GPU)
+# 11. Teste de import (sem GPU)
 RUN python -c "import sys; sys.path.insert(0, '.'); from comfy.ldm.flux.math import apply_rope1; print('OK: apply_rope1')" || echo "AVISO: apply_rope1 falhou"
 
 CMD ["/start.sh"]

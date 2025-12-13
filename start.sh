@@ -2,7 +2,7 @@
 # Nao usar set -e para evitar exit prematuro
 
 echo "========================================"
-echo "[WAN22] INICIANDO WORKER v5.0"
+echo "[WAN22] INICIANDO WORKER v5.1"
 echo "========================================"
 echo "[WAN22] Data: $(date)"
 
@@ -51,7 +51,6 @@ if [ -f "$CLIP_MODEL" ] && [ -s "$CLIP_MODEL" ]; then
     ls -lh "$CLIP_MODEL"
 else
     echo "[WAN22] AVISO: clip_vision_h.safetensors NAO encontrado!"
-    echo "[WAN22] Verificando diretorio clip_vision..."
     ls -la /comfyui/models/clip_vision/ 2>&1 || true
 fi
 
@@ -64,29 +63,38 @@ python main.py --disable-auto-launch --disable-metadata &
 COMFY_PID=$!
 echo "[WAN22] ComfyUI PID: $COMFY_PID"
 
-# Aguardar ComfyUI
-echo "[WAN22] Aguardando ComfyUI (max 180s)..."
-for i in $(seq 1 180); do
+# Aguardar ComfyUI - AUMENTADO para 300s (5 min) porque modelos sao grandes
+echo "[WAN22] Aguardando ComfyUI (max 300s - modelos grandes)..."
+COMFY_READY=0
+for i in $(seq 1 300); do
     if ! kill -0 $COMFY_PID 2>/dev/null; then
         echo "[WAN22] ERRO: ComfyUI morreu!"
         exit 1
     fi
 
-    if curl -s http://127.0.0.1:8188 > /dev/null 2>&1; then
+    # Tentar conectar com timeout curto
+    if curl -s --connect-timeout 2 --max-time 5 http://127.0.0.1:8188 > /dev/null 2>&1; then
         echo "[WAN22] ComfyUI ONLINE apos ${i}s!"
+        COMFY_READY=1
         break
     fi
 
     if [ $((i % 30)) -eq 0 ]; then
         echo "[WAN22] Ainda aguardando... (${i}s)"
+        # Verificar uso de memoria
+        nvidia-smi --query-gpu=memory.used,memory.free --format=csv,noheader 2>/dev/null || true
     fi
     sleep 1
 done
 
-# Verificar se ComfyUI iniciou
-if ! curl -s http://127.0.0.1:8188 > /dev/null 2>&1; then
-    echo "[WAN22] ERRO: ComfyUI nao iniciou!"
-    exit 1
+# Se nao conseguiu conectar mas processo ainda existe, tentar iniciar handler mesmo assim
+if [ $COMFY_READY -eq 0 ]; then
+    if kill -0 $COMFY_PID 2>/dev/null; then
+        echo "[WAN22] AVISO: Curl falhou mas ComfyUI esta rodando. Tentando iniciar handler..."
+    else
+        echo "[WAN22] ERRO: ComfyUI nao iniciou e processo morreu!"
+        exit 1
+    fi
 fi
 
 echo ""

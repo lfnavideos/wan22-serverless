@@ -51,20 +51,26 @@ RUN git clone https://github.com/kijai/ComfyUI-KJNodes.git && \
     cd ComfyUI-KJNodes && \
     pip install --no-cache-dir -r requirements.txt || true
 
-# 6. Criar diretorios e symlinks para modelos do volume
+# 6. Criar diretorios para modelos
 # O volume sera montado em /runpod-volume
 WORKDIR /comfyui
 RUN mkdir -p models/diffusion_models models/loras models/vae models/text_encoders models/clip models/clip_vision
 
-# 7. Copiar script de inicializacao
+# 7. PRE-DOWNLOAD CLIP Vision model na imagem (evita timeout do health check)
+# Este modelo de ~1.1GB e necessario para o CLIPVisionLoader do workflow
+RUN wget -O /comfyui/models/clip_vision/clip_vision_h.safetensors \
+    "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/clip_vision_h.safetensors" && \
+    ls -lh /comfyui/models/clip_vision/clip_vision_h.safetensors
+
+# 8. Copiar script de inicializacao
 # Salvar o start.sh original primeiro
 RUN if [ -f /start.sh ]; then mv /start.sh /start.sh.original; fi
 
-# 8. Copiar nosso start.sh customizado
+# 9. Copiar nosso start.sh customizado
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
 
-# 9. Teste de import (sem GPU)
+# 10. Teste de import (sem GPU)
 RUN python -c "import sys; sys.path.insert(0, '.'); from comfy.ldm.flux.math import apply_rope1; print('OK: apply_rope1')" || echo "AVISO: apply_rope1 falhou"
 
 CMD ["/start.sh"]

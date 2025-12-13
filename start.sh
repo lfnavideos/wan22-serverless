@@ -2,7 +2,7 @@
 # Nao usar set -e para evitar exit prematuro
 
 echo "========================================"
-echo "[WAN22] INICIANDO WORKER v4.0"
+echo "[WAN22] INICIANDO WORKER v5.0"
 echo "========================================"
 echo "[WAN22] Data: $(date)"
 
@@ -35,12 +35,6 @@ if [ -d "/runpod-volume" ]; then
                 echo "[WAN22] Symlink $dir: OK"
             fi
         done
-
-        # Symlink clip para clip_vision tambem
-        if [ -d "/runpod-volume/wan22_models/clip" ]; then
-            ln -sf /runpod-volume/wan22_models/clip/* /comfyui/models/clip_vision/ 2>/dev/null || true
-            echo "[WAN22] Symlink clip_vision: OK"
-        fi
     else
         echo "[WAN22] AVISO: wan22_models NAO encontrado"
     fi
@@ -48,50 +42,18 @@ else
     echo "[WAN22] AVISO: /runpod-volume NAO existe"
 fi
 
-# Download CLIP Vision model se nao existir
+# Verificar CLIP Vision (ja deve estar na imagem Docker)
 echo ""
 echo "[WAN22] === CLIP VISION ==="
 CLIP_MODEL="/comfyui/models/clip_vision/clip_vision_h.safetensors"
-mkdir -p /comfyui/models/clip_vision
-
-if [ ! -f "$CLIP_MODEL" ] || [ ! -s "$CLIP_MODEL" ]; then
-    echo "[WAN22] Baixando clip_vision_h.safetensors (~1.1GB)..."
-    rm -f "$CLIP_MODEL" 2>/dev/null || true
-
-    # Tentar wget
-    if command -v wget >/dev/null 2>&1; then
-        echo "[WAN22] Usando wget..."
-        wget -q -O "$CLIP_MODEL" "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/clip_vision_h.safetensors"
-        if [ -f "$CLIP_MODEL" ] && [ -s "$CLIP_MODEL" ]; then
-            echo "[WAN22] wget OK!"
-        else
-            echo "[WAN22] wget falhou, tentando curl..."
-            rm -f "$CLIP_MODEL" 2>/dev/null || true
-        fi
-    fi
-
-    # Se wget falhou, tentar curl
-    if [ ! -f "$CLIP_MODEL" ] || [ ! -s "$CLIP_MODEL" ]; then
-        if command -v curl >/dev/null 2>&1; then
-            echo "[WAN22] Usando curl..."
-            curl -sL -o "$CLIP_MODEL" "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/clip_vision_h.safetensors"
-        fi
-    fi
-
-    # Verificar resultado
-    if [ -f "$CLIP_MODEL" ] && [ -s "$CLIP_MODEL" ]; then
-        echo "[WAN22] clip_vision_h.safetensors baixado!"
-        ls -lh "$CLIP_MODEL"
-    else
-        echo "[WAN22] ERRO: Falha ao baixar clip_vision_h.safetensors"
-    fi
-else
-    echo "[WAN22] clip_vision_h.safetensors ja existe"
+if [ -f "$CLIP_MODEL" ] && [ -s "$CLIP_MODEL" ]; then
+    echo "[WAN22] clip_vision_h.safetensors OK (pre-instalado na imagem)"
     ls -lh "$CLIP_MODEL"
+else
+    echo "[WAN22] AVISO: clip_vision_h.safetensors NAO encontrado!"
+    echo "[WAN22] Verificando diretorio clip_vision..."
+    ls -la /comfyui/models/clip_vision/ 2>&1 || true
 fi
-
-echo "[WAN22] Conteudo clip_vision:"
-ls -la /comfyui/models/clip_vision/ 2>&1 | head -5
 
 # Iniciar ComfyUI
 echo ""
